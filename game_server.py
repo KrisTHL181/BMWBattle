@@ -1,6 +1,5 @@
-# 宝马争夺战
-
 import random
+import select
 import socket
 import json
 from game_logger import info
@@ -63,7 +62,6 @@ class GameServer:
             else:
                 info(f"当前玩家数量：{len(self.sockets)}，等待其他玩家加入...")
 
-
     def update(self) -> None:
         self.check_game_end()
         money_add = round(self.user_traffic * self.user_to_money_percent)
@@ -114,7 +112,24 @@ class GameServer:
         }
         self.send(json.dumps(log))
 
-    def get_action(self) -> str: ...  # Placeholder for the actual implementation
+    def receive_data(self):
+        readable, _, _ = select.select(self.sockets, [], [])
+        for sock in readable:
+            try:
+                data = sock.recv(1024)
+                if data:
+                    return json.loads(data.decode("utf-8"))
+            except socket.error:
+                pass
+
+    def get_action(self) -> str:
+        while True:
+            data = self.receive_data()
+            try:
+                json.loads(data)
+                return data
+            except ValueError:
+                continue
 
     def send(self, message: str) -> None:
         for sock in self.sockets:
@@ -130,7 +145,7 @@ class GameServer:
             self.user_traffic < self.iu_game_stop_traffic
             or self.iu_money < self.iu_game_stop_money
         ):
-            info("Kdp胜利!!!")
+            info("Kdp夺得宝马!!!")
             status = {
                 "status": "game_over",
                 "winner": "Kdp",
@@ -144,7 +159,7 @@ class GameServer:
             self.user_traffic > self.kdp_game_stop_traffic
             or self.iu_money > self.kdp_game_stop_money
         ):
-            info("IU胜利!!!")
+            info("IU夺得宝马!!!")
             status = {
                 "status": "game_over",
                 "winner": "iu",

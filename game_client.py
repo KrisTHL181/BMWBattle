@@ -42,7 +42,7 @@ class GameClient:
                 print(f"{Fore.YELLOW}操作：{data.get('action')}{Style.RESET_ALL}")
                 if data.get("status") == "game_over":
                     print(
-                        f"{Fore.MAGENTA}游戏结束，胜利者：{data['winner']}{Style.RESET_ALL}"
+                        f"{Fore.MAGENTA}游戏结束，宝马哥：{data['winner']}!{Style.RESET_ALL}"
                     )
                     self.close()
                     break
