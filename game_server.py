@@ -6,19 +6,12 @@ from game_logger import info, log
 
 
 class GameServer:
-    ACTION_MAP = {
-        "0": "DDoS",
-        "1": "修复主动防御",
-        "2": "误杀",
-        "3": "神拳",
-        "4": "写端增强",
-        "5": "购买流量",
-        "6": "舆论攻击",
-    }
+    with open("actions.json", "r", encoding="utf-8") as actions:
+        ACTION_MAP = json.load(actions)
 
     def __init__(
         self,
-        gamestart_players: int = 4,  # 当玩家数量大于此值后游戏开始
+        gamestart_players: int = 1,  # 当玩家数量大于此值后游戏开始
         iu_money: int = 3000,  # 初始IU金钱
         user_traffic: int = 500,  # 初始用户流量
         user_to_money_percent: float = 0.01,  # 用户流量转成金钱的系数
@@ -163,20 +156,18 @@ class GameServer:
         readable, _, _ = select.select(self.sockets, [], [])
         for sock in readable:
             try:
-                data = sock.recv(1024)
+                try:
+                    data = sock.recv(1024)
+                except ConnectionResetError:
+                    __import__("os")._exit(-1)
                 if data:
                     return json.loads(data.decode("utf-8"))
             except socket.error:
-                pass
+                return self.receive_data()
 
     def get_action(self) -> str:
-        while True:
-            data = self.receive_data()
-            try:
-                json.loads(data)
-                return data
-            except ValueError:
-                continue
+        data = self.receive_data()
+        return data["action"]
 
     def send(self, message: str) -> None:
         for sock in self.sockets:
@@ -199,7 +190,7 @@ class GameServer:
                 "iu_money": self.iu_money,
                 "user_traffic": self.user_traffic,
             }
-            self.send(status)
+            self.send(json.dumps(status))
             self.save_history()
             __import__("os")._exit(0)
         elif (
