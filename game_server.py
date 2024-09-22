@@ -2,6 +2,7 @@ import random
 import select
 import socket
 import json
+import time
 from game_logger import info, log
 
 
@@ -177,6 +178,13 @@ class GameServer:
         for sock in self.sockets:
             sock.close()
 
+    def wait_close(self) -> None:
+        for sock in self.sockets:
+            if sock._closed:
+                self.sockets.remove(sock)
+                sock.close()
+        __import__("os")._exit(0)
+
     def check_game_end(self) -> None:
         info(f"当前IU金钱: {self.iu_money}，当前用户流量: {self.user_traffic}")
         if (
@@ -192,7 +200,10 @@ class GameServer:
             }
             self.send(json.dumps(status))
             self.save_history()
-            __import__("os")._exit(0)
+            time.sleep(8)
+            for sock in self.sockets:
+                sock.shutdown(socket.SHUT_WR)
+            self.wait_close()
         elif (
             self.user_traffic > self.kdp_game_stop_traffic
             or self.iu_money > self.kdp_game_stop_money
@@ -200,13 +211,16 @@ class GameServer:
             log("IU夺得宝马!!!")
             status = {
                 "status": "game_over",
-                "winner": "iu",
+                "winner": "IU",
                 "iu_money": self.iu_money,
                 "user_traffic": self.user_traffic,
             }
-            self.send(status)
+            self.send(json.dumps(status))
             self.save_history()
-            __import__("os")._exit(0)
+            time.sleep(8)
+            for sock in self.sockets:
+                sock.shutdown(socket.SHUT_WR)
+            self.wait_close()
 
     def save_history(self, filename: str = "GameHistory.txt"):
         with open(filename, "w", encoding="utf-8") as file:
