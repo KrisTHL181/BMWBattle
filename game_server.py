@@ -12,7 +12,7 @@ class GameServer:
 
     def __init__(
         self,
-        gamestart_players: int = 1,  # 当玩家数量大于此值后游戏开始
+        gamestart_players: int = 4,  # 当玩家数量大于此值后游戏开始
         iu_money: int = 3000,  # 初始IU金钱
         user_traffic: int = 500,  # 初始用户流量
         user_to_money_percent: float = 0.01,  # 用户流量转成金钱的系数
@@ -56,7 +56,6 @@ class GameServer:
         self.sockets = []
 
     def game_loop(self) -> None:
-        port = random.randint(5000, 60000)
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.bind(("0.0.0.0", port))
         server_socket.listen(8)
@@ -227,6 +226,7 @@ class GameServer:
             json.dump(self.history, file, ensure_ascii=False, indent=2)
         info(f"历史记录已保存到 {filename}")
 
+port = 26091
 
 if __name__ == "__main__":
     game_server = GameServer()
