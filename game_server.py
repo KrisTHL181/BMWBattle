@@ -2,25 +2,37 @@ import random
 import select
 import socket
 import json
-from game_logger import info
+from game_logger import info, log
 
 
 class GameServer:
-    ACTION_MAP = {"0": "DDoS", "1": "修复主动防御", "2": "误杀", "3": "神拳"}
+    ACTION_MAP = {
+        "0": "DDoS",
+        "1": "修复主动防御",
+        "2": "误杀",
+        "3": "神拳",
+        "4": "写端增强",
+        "5": "购买流量",
+        "6": "舆论攻击",
+    }
 
     def __init__(
         self,
         gamestart_players: int = 4,  # 当玩家数量大于此值后游戏开始
         iu_money: int = 3000,  # 初始IU金钱
-        user_traffic: int = 350,  # 初始用户流量
-        user_to_money_percent: float = 0.02,  # 用户流量转成金钱的系数
-        reduce_utility: float = 0.05,  # DDoS和误杀的效用系数
+        user_traffic: int = 500,  # 初始用户流量
+        user_to_money_percent: float = 0.01,  # 用户流量转成金钱的系数
+        reduce_utility: float = 0.03,  # DDoS和误杀的效用系数
         reduce_bias: float = 0.01,  # 降低用户流量的随机加减范围
         ddos_reduce_money: int = 20,  # IU被DDoS攻击减少的金钱
-        fix_utility: float = 0.005,  # 修复主防所带来的用户系数
+        fix_utility: float = 0.01,  # 修复主防所带来的用户系数
         fix_bias: float = 0.05,  # 修复主防所带来的用户流量随机加减范围
-        fix_used_money: int = 20,  # 修复主防消耗的金钱
-        fix_add_traffic: int = 50,  # 修复主防增加的用户流量
+        fix_used_money: int = 50,  # 修复主防消耗的金钱
+        fix_add_traffic: int = 150,  # 修复主防增加的用户流量
+        buy_traffic_money: int = 150,  # 购买用户流量需要的金额
+        buy_traffic_add: int = 500,  # 购买的用户流量数额
+        overspeech_attack_reduce: int = 200,  # 舆论攻击降低的流量
+        overspeech_attack_bias: float = 0.05,  # 舆论攻击流量降低随机偏差
         iu_game_stop_traffic: int = 0,  # 当用户流量小于此值后Kdp胜利
         iu_game_stop_money: int = 0,  # 当IU金钱小于此值后Kdp胜利
         kdp_game_stop_traffic: int = 10000,  # 当用户流量大于此值后IU胜利
@@ -37,6 +49,10 @@ class GameServer:
         self.fix_bias = fix_bias
         self.fix_used_money = fix_used_money
         self.fix_add_traffic = fix_add_traffic
+        self.buy_traffic_money = buy_traffic_money
+        self.buy_traffic_add = buy_traffic_add
+        self.overspeech_attack_reduce = overspeech_attack_reduce
+        self.overspeech_attack_bias = overspeech_attack_bias
         self.iu_game_stop_traffic = iu_game_stop_traffic
         self.iu_game_stop_money = iu_game_stop_money
         self.kdp_game_stop_traffic = kdp_game_stop_traffic
@@ -59,8 +75,21 @@ class GameServer:
             if len(self.sockets) >= self.gamestart_players:
                 info(f"当前玩家数量：{len(self.sockets)}，游戏开始")
                 self.send(json.dumps({"status": "game_start"}))
+                break
             else:
                 info(f"当前玩家数量：{len(self.sockets)}，等待其他玩家加入...")
+
+        while True:
+            self.update()
+
+    def test_game_loop(self):
+        self.send = lambda *args, **kwargs: None
+        globals()["random"].__getattribute__ = (
+            __import__("secrets").SystemRandom().__getattribute__
+        )
+        self.get_action = lambda: random.choice(list(self.ACTION_MAP))
+        while True:
+            self.update()
 
     def update(self) -> None:
         self.check_game_end()
@@ -95,13 +124,31 @@ class GameServer:
             self.user_traffic -= traffic
             info(f"IU被误杀，用户流量减少{traffic}")
         elif action == "神拳":
-            bias = random.uniform(-self.reduce_bias, self.reduce_bias)
-            traffic = round((1 + bias) * self.reduce_utility * self.user_traffic)
-            self.user_traffic -= traffic
-            info(f"IU使用神拳，用户流量降低{traffic}，跳过一回合误杀")
+            utility = round(
+                random.uniform(self.reduce_bias, self.reduce_bias * 1.5) / 3, 3
+            )
+            self.reduce_utility -= utility
+            info(f"IU使用神拳，跳过一回合误杀，降低DDoS效用{utility}")
             self.skip_false_alarm = True
+        elif action == "写端增强":
+            utility = round(
+                random.uniform(self.reduce_bias, self.reduce_bias * 1.5) / 2, 3
+            )
+            self.reduce_utility += utility
+            info(f"使用写端增强，DDoS效用增加{utility}")
+        elif action == "购买流量":
+            self.iu_money -= self.buy_traffic_money
+            self.user_traffic += self.buy_traffic_add
+            info(f"IU利用{self.buy_traffic_money}元购买了{self.buy_traffic_add}流量")
+        elif action == "舆论攻击":
+            bias = random.uniform(
+                -self.overspeech_attack_bias, self.overspeech_attack_bias
+            )
+            traffic = round((1 + bias) * self.overspeech_attack_reduce)
+            self.user_traffic -= traffic
+            info(f"使用舆论攻击让IU用户流量降低{traffic}")
         else:
-            info("未知操作")
+            info(f"未知操作: {action}")
         self.history["iu_money"].append(self.iu_money)
         self.history["user_traffic"].append(self.user_traffic)
         log = {
@@ -145,7 +192,7 @@ class GameServer:
             self.user_traffic < self.iu_game_stop_traffic
             or self.iu_money < self.iu_game_stop_money
         ):
-            info("Kdp夺得宝马!!!")
+            log("Kdp夺得宝马!!!")
             status = {
                 "status": "game_over",
                 "winner": "Kdp",
@@ -159,7 +206,7 @@ class GameServer:
             self.user_traffic > self.kdp_game_stop_traffic
             or self.iu_money > self.kdp_game_stop_money
         ):
-            info("IU夺得宝马!!!")
+            log("IU夺得宝马!!!")
             status = {
                 "status": "game_over",
                 "winner": "iu",
