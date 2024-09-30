@@ -53,7 +53,7 @@ class GameServer:
         self.kdp_game_stop_money = kdp_game_stop_money
         self.history = {"iu_money": [], "user_traffic": []}
         self.skip_false_alarm = False
-        self.sockets = []
+        self.sockets = {"kdp": [], "iu": []}
 
     def game_loop(self) -> None:
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -64,13 +64,36 @@ class GameServer:
         while True:
             client_socket, addr = server_socket.accept()
             info(f"客户端 {addr} 已连接")
-            self.sockets.append(client_socket)
-            if len(self.sockets) >= self.gamestart_players:
-                info(f"当前玩家数量：{len(self.sockets)}，游戏开始")
-                self.send(json.dumps({"status": "game_start"}))
+            try:
+                self.sockets[
+                    json.dumps(client_socket.recv(1024))
+                    .get("job", random.choice(["kdp", "iu"]))
+                    .lower()
+                ].append(
+                    client_socket
+                )  # 根据数据选择职业, 若数据解析失败则随机挑选职业
+            except json.JSONDecodeError:
+                pass
+            except OSError:
+                continue
+            if (
+                len([*self.sockets["iu"], *self.sockets["kdp"]])
+                >= self.gamestart_players
+            ):
+                info(
+                    f"当前玩家数量：{len([*self.sockets['iu'], *self.sockets['kdp']])}，游戏开始"
+                )
+                if (self.sockets["kdp"] % 2) != self.gamestart_players % 2:
+                    self.send(
+                        json.dumps({"status": "game_start", "job_unbalanced": True})
+                    )
+                    break
+                self.send(json.dumps({"status": "game_start", "job_unbalanced": False}))
                 break
             else:
-                info(f"当前玩家数量：{len(self.sockets)}，等待其他玩家加入...")
+                info(
+                    f"当前玩家数量：{len([*self.sockets['iu'], *self.sockets['kdp']])}，等待其他玩家加入..."
+                )
 
         while True:
             self.update()
@@ -159,30 +182,26 @@ class GameServer:
                 try:
                     data = sock.recv(1024)
                 except ConnectionResetError:
-                    __import__("os")._exit(-1)
+                    return {}
                 if data:
-                    return json.loads(data.decode("utf-8"))
+                    try:
+                        json.loads(data.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        return {}
             except socket.error:
-                return self.receive_data()
+                return {}
 
     def get_action(self) -> str:
         data = self.receive_data()
-        return data["action"]
+        return data.get("action")
 
     def send(self, message: str) -> None:
-        for sock in self.sockets:
+        for sock in self.iter_sockets():
             sock.send(message.encode("utf-8"))
 
     def close(self) -> None:
-        for sock in self.sockets:
+        for sock in self.iter_sockets():
             sock.close()
-
-    def wait_close(self) -> None:
-        for sock in self.sockets:
-            if sock._closed:
-                self.sockets.remove(sock)
-                sock.close()
-        __import__("os")._exit(0)
 
     def check_game_end(self) -> None:
         info(f"当前IU金钱: {self.iu_money}，当前用户流量: {self.user_traffic}")
@@ -199,10 +218,8 @@ class GameServer:
             }
             self.send(json.dumps(status))
             self.save_history()
-            time.sleep(8)
-            for sock in self.sockets:
-                sock.shutdown(socket.SHUT_WR)
-            self.wait_close()
+            time.sleep(5)
+            self.close()
         elif (
             self.user_traffic > self.kdp_game_stop_traffic
             or self.iu_money > self.kdp_game_stop_money
@@ -216,15 +233,20 @@ class GameServer:
             }
             self.send(json.dumps(status))
             self.save_history()
-            time.sleep(8)
-            for sock in self.sockets:
+            time.sleep(5)
+            for sock in self.iter_sockets():
                 sock.shutdown(socket.SHUT_WR)
-            self.wait_close()
+            self.close()
 
     def save_history(self, filename: str = "GameHistory.txt"):
         with open(filename, "w", encoding="utf-8") as file:
             json.dump(self.history, file, ensure_ascii=False, indent=2)
         info(f"历史记录已保存到 {filename}")
+
+    def iter_sockets(self):
+        for sock in [*self.sockets["kdp"], *self.sockets["iu"]]:
+            yield sock
+
 
 port = 26091
 
